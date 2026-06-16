@@ -1,0 +1,10 @@
+__pycache__/
+.env
+.github_urls.txt
+*.pyc
+.Python
+env/
+venv/
+.venv/
+.idea/
+.vscode/
