@@ -3,18 +3,15 @@
 Discord GitHub URL Scraper (Universal Log Edition)
 
 Crawls a Discord server and captures GitHub URLs across all text, voice, 
-stage, and forum channels. Outputs structured timelines with channel classifications.
-
-Authored by: Gemini something or other
-Poorly reviewed by: Dan Theisen
-
-eat my shorts
+stage, and forum channels. Outputs structured timelines with parent-child 
+hierarchies for threads and forum posts.
 """
 
 import os
 import re
 import argparse
 import time
+import asyncio
 from typing import List, Dict, Any
 
 import discord
@@ -64,7 +61,7 @@ def determine_detailed_type(target) -> str:
     return target.type.name
 
 
-async def scrape_history(target, include_id: bool) -> List[Dict[str, Any]]:
+async def scrape_history(target, include_id: bool, parent_name: str = None) -> List[Dict[str, Any]]:
     """Iterates message history and extracts metadata records."""
     records = []
     try:
@@ -72,9 +69,12 @@ async def scrape_history(target, include_id: bool) -> List[Dict[str, Any]]:
             if "github.com" in msg.content.lower():
                 urls = extract_clean_urls(msg.content)
                 for url in urls:
+                    # Apply nested path hierarchy format if dealing with a thread/post
+                    channel_display = f"{parent_name}>{target.name}" if parent_name else target.name
+                    
                     item = {
                         "timestamp": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                        "channel": target.name,
+                        "channel": channel_display,
                         "type": determine_detailed_type(target),
                         "url": url
                     }
@@ -97,6 +97,11 @@ class ScraperClient(discord.Client):
         self.include_id = include_id
         self.start_time = None
 
+    async def close(self):
+        """Overrides client closure to fix unclosed aiohttp connectors."""
+        await super().close()
+        await asyncio.sleep(0.25)
+
     async def process_channel(self, channel) -> List[Dict[str, Any]]:
         """Extracts records from a parent channel and explicitly logs thread navigation."""
         channel_records = []
@@ -110,14 +115,14 @@ class ScraperClient(discord.Client):
         if hasattr(channel, "threads") and channel.threads:
             for thread in channel.threads:
                 print(f"    -> Entering active {'post' if channel.type == discord.ChannelType.forum else 'thread'}: #{thread.name}")
-                channel_records.extend(await scrape_history(thread, self.include_id))
+                channel_records.extend(await scrape_history(thread, self.include_id, parent_name=channel.name))
 
         # 3. Archived public threads/posts
         if hasattr(channel, "fetch_public_archived_threads"):
             try:
                 async for thread in channel.fetch_public_archived_threads(limit=None):
                     print(f"    -> Entering archived public {'post' if channel.type == discord.ChannelType.forum else 'thread'}: #{thread.name}")
-                    channel_records.extend(await scrape_history(thread, self.include_id))
+                    channel_records.extend(await scrape_history(thread, self.include_id, parent_name=channel.name))
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
@@ -126,7 +131,7 @@ class ScraperClient(discord.Client):
             try:
                 async for thread in channel.fetch_private_archived_threads(limit=None):
                     print(f"    -> Entering archived private thread: #{thread.name}")
-                    channel_records.extend(await scrape_history(thread, self.include_id))
+                    channel_records.extend(await scrape_history(thread, self.include_id, parent_name=channel.name))
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
