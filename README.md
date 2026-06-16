@@ -2,6 +2,8 @@
 
 A lightweight one‑shot Discord bot that scans a server and extracts every GitHub repository URL mentioned in any message (including forum posts, threads, etc.).  The URLs are stored in `github_urls.txt`.
 
+> **⚠️ Use responsibly** – Only run on servers where you have permission to read all messages.
+
 ## wat the fuck am i looking at chat???
 
 This bot is 100% slop and I don't care because I tested it and it seems to do what I want to, and nothing more. I probably looked at a dozen or so of the lines of code closely. First pass was through gpt-oss-4 20b using default parameters in LM studio. Inference on that took 30 minutes and the result was unusable. Pasted results at Gemini free prompt (trial tokens or whatever) and iterated through it on multiple passes, copying and pasting into vim, and committing by hand. I mostly reflected in the git commits with stupid messages that I made throughout the creation of this repository. I don't truly care enough about the discord API to want to understand how it works. I just wanted this little analytical helper tool. I did manage to get a full shell script out of gpt-oss running locally that ran first try, and scaffolded most of the repo, including the ToS and Privacy Policies, which I have reviewed and can confirm I will comply to.
@@ -10,7 +12,7 @@ This project may eventually store the Discord User ID's of users who sent Github
 
 I do plan to spend some real effort on writing some higher quality code to crunch the eventual data collected by this bot. This repo is half shitpost and half personal experiment. I gotta say, I'm mildly surprised at my results. It took me almost as long to decipher all of Discord's bot bullshit (and do their dumbass ID verification... ok whatever I kind of understand... for ur prized api...) as it did to prompt the LLM's and copy-paste shit between bot response and vim, then run a quick manual test on a test discord guild I set up with a bunch of the edge cases related to this code (all the god forsaken different kinds of message types). This shit in the readme that you're reading right now is basically the vast majority of my personal textual contribution to this repository, other than the prompts that were used to get to this point, which will probably be lost to the sands of time. Who cares. the code works. /shruggie 
 
-> **⚠️ Use responsibly** – Only run on servers where you have permission to read all messages.
+The whole project maybe took me 5 hours of prompt jockeying (50%) and attempting to manually read discord's docs, and set up all the necessary bot bullshit for the first time (50%). The Discord Bot setup part was more annoying by far.
 
 ## Prerequisites
 
