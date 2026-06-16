@@ -2,13 +2,10 @@
 """
 Discord GitHub URL Scraper (Universal Log Edition)
 
-This script crawls an entire Discord server once and logs every GitHub URL
-found across all text, voice, stage, and forum channels/threads. 
+Crawls a Discord server and captures GitHub URLs across all text, voice, 
+stage, and forum channels. Outputs structured timelines with channel classifications.
 
-It outputs a structured log file containing the timestamp, channel name,
-channel type, and the exact matched URL.
-
-Authored by: Gemini (what? it seemed like it knew what it was talking about more)
+Authored by: Gemini something or other
 Poorly reviewed by: Dan Theisen
 
 eat my shorts
@@ -16,13 +13,15 @@ eat my shorts
 
 import os
 import re
-from typing import List, Tuple
+import argparse
+import time
+from typing import List, Dict, Any
 
 import discord
 from dotenv import load_dotenv
 
 # --------------------------------------------------------------------------- #
-# Configuration
+# Configuration & Argument Parsing
 # --------------------------------------------------------------------------- #
 
 load_dotenv()
@@ -35,28 +34,20 @@ if not TOKEN:
 if GUILD_ID == 0:
     raise ValueError("GUILD_ID not set or invalid in .env")
 
-# Loosened regex to capture any subdomains where github.com is the main domain
 GITHUB_LOOSE_RE = re.compile(
     r"https?://(?:[a-zA-Z0-9_.-]+\.)*github\.com/[^\s<>]+",
     flags=re.IGNORECASE,
 )
 
 # --------------------------------------------------------------------------- #
-# Discord Client Setup
+# Core Logic & Helper Functions
 # --------------------------------------------------------------------------- #
-
-intents = discord.Intents.default()
-intents.message_content = True  # Required to read message text
-
-client = discord.Client(intents=intents)
-
 
 def extract_clean_urls(content: str) -> List[str]:
     """Extracts GitHub URLs and strips trailing punctuation cleanly."""
     cleaned_urls = []
     for match in GITHUB_LOOSE_RE.finditer(content):
         url = match.group(0)
-        # Strip trailing punctuation common at the end of conversational sentences
         while url and url[-1] in ".,;:!?()[]{}'\"":
             url = url[:-1]
         if url:
@@ -64,101 +55,160 @@ def extract_clean_urls(content: str) -> List[str]:
     return cleaned_urls
 
 
-async def scrape_history(target) -> List[Tuple[str, str, str, str]]:
+def determine_detailed_type(target) -> str:
+    """Distinguishes regular text channel threads from forum posts."""
+    if isinstance(target, discord.Thread):
+        if isinstance(target.parent, discord.ForumChannel):
+            return "forum_post"
+        return "text_thread" if target.type == discord.ChannelType.public_thread else "private_thread"
+    return target.type.name
+
+
+async def scrape_history(target, include_id: bool) -> List[Dict[str, Any]]:
     """Iterates message history and extracts metadata records."""
     records = []
     try:
-        # limit=None pulls everything; discord.py handles rate limits natively
         async for msg in target.history(limit=None):
             if "github.com" in msg.content.lower():
                 urls = extract_clean_urls(msg.content)
                 for url in urls:
-                    timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                    channel_name = target.name
-                    channel_type = target.type.name  # Clean string representation (e.g. 'text', 'public_thread')
-                    records.append((timestamp, channel_name, channel_type, url))
+                    item = {
+                        "timestamp": msg.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        "channel": target.name,
+                        "type": determine_detailed_type(target),
+                        "url": url
+                    }
+                    if include_id:
+                        item["author_id"] = str(msg.author.id)
+                    records.append(item)
     except discord.Forbidden:
-        pass  # Quietly bypass channels the bot lacks permissions to read
+        pass  
     except discord.HTTPException as exc:
         print(f"    ⚠️ Error reading history in {target.name}: {exc}")
     return records
 
+# --------------------------------------------------------------------------- #
+# Custom Discord Client
+# --------------------------------------------------------------------------- #
 
-async def process_channel(channel) -> List[Tuple[str, str, str, str]]:
-    """Extracts URL records from a parent channel and its nested threads/posts."""
-    channel_records = []
-    print(f"  • Scanning {channel.type} #{channel.name}")
+class ScraperClient(discord.Client):
+    def __init__(self, include_id: bool, **kwargs):
+        super().__init__(**kwargs)
+        self.include_id = include_id
+        self.start_time = None
 
-    # 1. Scrape base channel text (if it holds messages directly and isn't a forum root)
-    if hasattr(channel, "history") and not isinstance(channel, discord.ForumChannel):
-        channel_records.extend(await scrape_history(channel))
+    async def process_channel(self, channel) -> List[Dict[str, Any]]:
+        """Extracts records from a parent channel and explicitly logs thread navigation."""
+        channel_records = []
+        print(f"  • Scanning {channel.type} #{channel.name}")
 
-    # 2. Scrape active threads or forum posts
-    if hasattr(channel, "threads"):
-        for thread in channel.threads:
-            channel_records.extend(await scrape_history(thread))
+        # 1. Base channel text 
+        if hasattr(channel, "history") and not isinstance(channel, discord.ForumChannel):
+            channel_records.extend(await scrape_history(channel, self.include_id))
 
-    # 3. Scrape archived public threads/posts
-    if hasattr(channel, "fetch_public_archived_threads"):
-        try:
-            async for thread in channel.fetch_public_archived_threads(limit=None):
-                channel_records.extend(await scrape_history(thread))
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        # 2. Active threads / forum posts
+        if hasattr(channel, "threads") and channel.threads:
+            for thread in channel.threads:
+                print(f"    -> Entering active {'post' if channel.type == discord.ChannelType.forum else 'thread'}: #{thread.name}")
+                channel_records.extend(await scrape_history(thread, self.include_id))
 
-    # 4. Scrape archived private threads
-    if hasattr(channel, "fetch_private_archived_threads"):
-        try:
-            async for thread in channel.fetch_private_archived_threads(limit=None):
-                channel_records.extend(await scrape_history(thread))
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        # 3. Archived public threads/posts
+        if hasattr(channel, "fetch_public_archived_threads"):
+            try:
+                async for thread in channel.fetch_public_archived_threads(limit=None):
+                    print(f"    -> Entering archived public {'post' if channel.type == discord.ChannelType.forum else 'thread'}: #{thread.name}")
+                    channel_records.extend(await scrape_history(thread, self.include_id))
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
-    return channel_records
+        # 4. Archived private threads
+        if hasattr(channel, "fetch_private_archived_threads"):
+            try:
+                async for thread in channel.fetch_private_archived_threads(limit=None):
+                    print(f"    -> Entering archived private thread: #{thread.name}")
+                    channel_records.extend(await scrape_history(thread, self.include_id))
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
+        return channel_records
 
-@client.event
-async def on_ready():
-    print(f"✅ Logged in as {client.user} (ID: {client.user.id})")
-    
-    guild = client.get_guild(GUILD_ID)
-    if not guild:
-        print("❌ Guild not found – check your GUILD_ID.")
-        await client.close()
-        return
+    async def on_ready(self):
+        self.start_time = time.perf_counter()
+        print(f"✅ Logged in as {self.user} (ID: {self.user.id})")
+        
+        guild = self.get_guild(GUILD_ID)
+        if not guild:
+            print("❌ Guild not found – check your GUILD_ID.")
+            await self.close()
+            return
 
-    print(f"🔍 Compiling targets for '{guild.name}'...")
-    
-    # Gather ALL text-bearing channel types supported by Discord
-    valid_types = (discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.ForumChannel)
-    channels_to_scan = [ch for ch in guild.channels if isinstance(ch, valid_types)]
+        print(f"🔍 Compiling targets for '{guild.name}'...")
+        
+        # Categorize channels into structural blocks for isolated metric analysis
+        channel_groups = {
+            "Text Channels": [ch for ch in guild.channels if isinstance(ch, discord.TextChannel)],
+            "Forum Channels": [ch for ch in guild.channels if isinstance(ch, discord.ForumChannel)],
+            "Voice Channels": [ch for ch in guild.channels if isinstance(ch, discord.VoiceChannel)],
+            "Stage Channels": [ch for ch in guild.channels if isinstance(ch, discord.StageChannel)]
+        }
 
-    all_records = []
-    for channel in channels_to_scan:
-        records = await process_channel(channel)
-        all_records.extend(records)
+        all_records = []
 
-    # Sort records chronologically by their timestamp string
-    all_records.sort(key=lambda x: x[0])
+        # Process each channel block dynamically
+        for group_label, channels in channel_groups.items():
+            if not channels:
+                continue
+                
+            print(f"\n📂 Processing Group: {group_label}")
+            group_subtotal = 0
+            
+            for channel in channels:
+                records = await self.process_channel(channel)
+                all_records.extend(records)
+                group_subtotal += len(records)
+                
+            print(f"📊 Subtotal for {group_label}: {group_subtotal} matches found.")
 
-    out_file = "github_urls.txt"
-    with open(out_file, "w", encoding="utf-8") as f:
-        for timestamp, channel, ch_type, url in all_records:
-            # Outputs clean rows separated by pipes for straightforward parsing
-            f.write(f"{timestamp} | #{channel} | {ch_type} | {url}\n")
+        # Final sorting index based chronologically on timestamps
+        all_records.sort(key=lambda x: x["timestamp"])
 
-    print(f"\n✅ Finished sweep. Found {len(all_records)} total GitHub URL mentions.")
-    print(f"✅ Exported structured data to {out_file}")
+        out_file = "github_urls.txt"
+        with open(out_file, "w", encoding="utf-8") as f:
+            for r in all_records:
+                if self.include_id:
+                    f.write(f"{r['timestamp']} | {r['author_id']} | #{r['channel']} | {r['type']} | {r['url']}\n")
+                else:
+                    f.write(f"{r['timestamp']} | #{r['channel']} | {r['type']} | {r['url']}\n")
 
-    await client.close()
+        print(f"\n✅ Finished sweep. Found {len(all_records)} total GitHub URL mentions.")
+        print(f"✅ Exported structured data to {out_file}")
 
+        # Benchmark processing speed
+        elapsed_time = time.perf_counter() - self.start_time
+        print(f"⏱️ Total execution wall-clock time: {elapsed_time:.2f} seconds")
+
+        await self.close()
 
 # --------------------------------------------------------------------------- #
 # Main Execution Entry Point
 # --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Discord Server GitHub URL Extraction Tool")
+    parser.add_argument(
+        "--include-id", 
+        action="store_true", 
+        help="Include the message sender's Discord ID in the final export schema."
+    )
+    args = parser.parse_args()
+
+    intents = discord.Intents.default()
+    intents.message_content = True  
+
+    client = ScraperClient(include_id=args.include_id, intents=intents)
+    
     try:
         client.run(TOKEN)
     except KeyboardInterrupt:
-        print("\n❌ Execution canceled by user.")
+        print("\n❌ Execution terminated via user keyboard break.")
+
