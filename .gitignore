@@ -1,6 +1,7 @@
 __pycache__/
 .env
 github_urls.txt
+github_scraper.db
 *.pyc
 .Python
 env/
