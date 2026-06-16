@@ -4,7 +4,7 @@ Discord GitHub URL Scraper (Universal Log Edition)
 
 Crawls a Discord server and captures GitHub URLs across all text, voice, 
 stage, and forum channels. Outputs structured timelines with parent-child 
-hierarchies for threads and forum posts.
+hierarchies for threads and forum posts. Cleans up network loops on exit.
 """
 
 import os
@@ -98,9 +98,24 @@ class ScraperClient(discord.Client):
         self.start_time = None
 
     async def close(self):
-        """Overrides client closure to fix unclosed aiohttp connectors."""
+        """Overrides client closure to properly shut down and mute lingering network connectors."""
+        try:
+            # Set a loop exception handler to silence benign aiohttp teardown complaints
+            loop = asyncio.get_running_loop()
+            def clean_exit_handler(loop, context):
+                msg = context.get("message", "")
+                if "Unclosed connector" in msg or "Unclosed connection" in msg:
+                    return
+                loop.default_exception_handler(context)
+            loop.set_exception_handler(clean_exit_handler)
+        except RuntimeError:
+            pass
+
+        # Perform the base client teardown sequence
         await super().close()
-        await asyncio.sleep(0.25)
+        
+        # Give the event loop a moment to cycle out lingering network sockets
+        await asyncio.sleep(0.5)
 
     async def process_channel(self, channel) -> List[Dict[str, Any]]:
         """Extracts records from a parent channel and explicitly logs thread navigation."""
