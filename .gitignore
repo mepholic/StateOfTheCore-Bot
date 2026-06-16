@@ -1,6 +1,6 @@
 __pycache__/
 .env
-.github_urls.txt
+github_urls.txt
 *.pyc
 .Python
 env/
