@@ -107,7 +107,7 @@ Anyways... I don't truly care enough about the discord API to want to understand
 
 ## anyways I digress...
 
-Gemini regular webui chat prompt got me to a first deliverable of "can dump useful bullshit 2 text file" without having to do much more than `Ctrl-c` `Alt-Tab` "`vim filename.piss`" "`dG`" "`i`" `Shift-Insert` "`:q`" `python filename.piss` for each iteration.
+Gemini regular webui chat prompt got me to a first deliverable of "can dump useful bullshit 2 text file" without having to do much more than `Ctrl-c` `Alt-Tab` "`vim filename.piss`" "`dG`" "`i`" `Shift-Insert` "`:q`" `python filename.piss` `Alt-Tab` for each iteration.
 
 _**iykyk**, however if you don't know but pay close attention, you can actually learn how to exit vim from that last idiotic line of text_
 
